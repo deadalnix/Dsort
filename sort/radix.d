@@ -61,6 +61,8 @@ private uint radixMulitPass(uint S, uint A, uint B, alias OffsetsCalculator = co
 
 uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	assert(datas.length <= uint.max);
+} out{
+	assert(isSorted(datas));
 } body {
 	uint[] histogram = histogramBuffer[0 .. 256 * T.sizeof];
 	
@@ -73,21 +75,24 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	ubyte[T.sizeof][] destination	= (cast(ubyte[T.sizeof][]) buffer)[0 .. source.length];
 	
 	// Build histograms
-	histogram[]	= 0;
-	T prev		= datas[0];
-	ubyte* p	= source.ptr.ptr;
-	ubyte* pe	= p + (source.length * T.sizeof);
+	histogram[]			= 0;
+	T prev				= datas[0];
+	ubyte[T.sizeof]* p	= source.ptr;
+	ubyte[T.sizeof]* pe	= p + source.length;
 	while(p < pe) {
+		ubyte[T.sizeof] rawdata = *p;
+		
 		// Check if array is already sorted
-		T current = *(cast(T*) p);
+		T current = *(cast(T*) rawdata.ptr);
 		if(current < prev) break;
 		prev = current;
 		
 		// Fill histogram
-		foreach(i; 0 .. T.sizeof) {
-			(histogram.ptr + (i * 256))[*p]++;
-			p++;
+		foreach(uint i, ubyte radix; rawdata) {
+			histogram[radix + i * 256]++;
 		}
+		
+		p++;
 	}
 	
 	// If p == pe, then the array is sorted already sorted, as we never breaked.
@@ -95,11 +100,14 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	
 	// Finish filling histogram without checkign if the array is already sorted.
 	while(p < pe) {
+		ubyte[T.sizeof] rawdata = *p;
+		
 		// Fill histogram
-		foreach(i; 0 .. T.sizeof) {
-			(histogram.ptr + (i * 256))[*p]++;
-			p++;
+		foreach(uint i, ubyte radix; rawdata) {
+			histogram[radix + i * 256]++;
 		}
+		
+		p++;
 	}
 	
 	assert(p == pe);
@@ -116,7 +124,10 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	}
 	
 	// If an odd number of passes have been done, they we need to copy once more to get an in place sort.
-	if((nbPasses % 2) != 0)  destination[] = source;
+	if((nbPasses % 2) != 0)  {
+		destination[] = source;
+		nbPasses++;
+	}
 	
 	// Each counted pass + the first one to init histograms
 	return nbPasses + 1;
@@ -142,7 +153,7 @@ unittest {
 		return elapsed;
 	}
 	
-	foreach(S; [128, 256, 512, 8192, 65536, 65536 * 1024]) {
+	foreach(S; [128, 256, 512, 8192, 65536, 65536 * 32]) {
 		foreach(T; TypeTuple!(ubyte, byte, ushort, short, uint, int, ulong, long)) {
 			// Prepare buffer
 			if(buffer.length < S * T.sizeof) {
@@ -162,6 +173,8 @@ unittest {
 			
 			// Already sorted array.
 			{
+				v[] = T.max;
+				
 				foreach(b; 0 .. min(S, T.max)) {
 					v[b] = cast(T) b;
 				}
@@ -178,13 +191,13 @@ unittest {
 			// Unsorted array
 			{
 				foreach(b; 0 .. min(S, T.max)) {
-					v[S - b] = cast(T) b;
+					v[S - b - 1] = cast(T) b;
 				}
 				
 				test(v, "unsorted1");
 				
 				foreach(b; T.min .. min(T.min + S, T.max)) {
-					v[S + T.min - b] = cast(T) b;
+					v[S + T.min - b - 1] = cast(T) b;
 				}
 				
 				test(v, "unsorted2");
