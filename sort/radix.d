@@ -283,7 +283,7 @@ unittest {
 	
 	ulong refdruntime(T)(T[] v, string testname) {
 		sw.reset();
-		v.sort;
+		sort(v);
 		ulong elapsed = sw.peek().hnsecs;
 		
 		assert(isSorted(v));
@@ -367,9 +367,26 @@ unittest {
 				refdruntime(v, "random");
 			}
 		}
-	}
+		
+		// Random array of floats
+		{
+			import std.random;
+			Mt19937 gen;
 	
-	float[] f = [2.1f, 2.0f, 3.0f, 7.256f, -3.141592f];
-	test(f, "float");
+			float[] v;
+			v.length = S;
+			
+			foreach(ref float t; v) {
+				uint tmp = gen.front;
+				t = *(cast(float*) &tmp);
+				gen.popFront;
+			}
+			
+			test(v.dup, "random");
+			
+			// TODO: phobos crash on that one, do bug repport.
+			// refdruntime(v, "random");
+		}
+	}
 }
 
