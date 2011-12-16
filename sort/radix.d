@@ -180,7 +180,7 @@ uint radix(T)(T[] datas) if(isNumeric!(T) && (T.sizeof <= maxTypeSize)) in {
 		p++;
 	}
 	
-	// If p == pe, then the array is sorted already sorted, as we never breaked.
+	// If p == pe, then the array is already sorted, as we never breaked.
 	if(p == pe) return 0;
 	
 	// Finish filling histogram without checkign if the array is already sorted.
