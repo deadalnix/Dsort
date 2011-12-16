@@ -4,7 +4,7 @@ import std.algorithm;
 import std.traits;
 import core.memory;
 
-// By testing this radix isn't interesting if sizeof > 4. I don't really know why.
+// By testing this radix isn't interesting if sizeof > 4. I don't really know why, because it supposed to be O(N) anyway.
 private immutable uint maxTypeSize = 4;
 private void[] buffer = void;
 private uint[maxTypeSize * 256] histogram = void;
@@ -13,21 +13,18 @@ void clearBuffer() {
 	buffer = null;
 }
 
-template requireRadixify(T) {
+private template requireRadixify(T) {
 	enum bool requireRadixify = isFloatingPoint!(T);
 }
 
-enum RadixifyMode {
+private enum RadixifyMode {
 	DoNothing,
 	Radixify,
 	RadixifyAndStore,
 	UnRadixify,
 }
 
-private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) out(res) {
-	import std.stdio;
-	writeln(res);
-} body {
+private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) {
 	uint f = *(cast(uint*) &data);
 	uint mask = -(f >> 31) | 0x80000000;
 	f ^= mask;
@@ -35,15 +32,18 @@ private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) out(res)
 	return *(cast(ubyte[T.sizeof]*) &f);
 }
 
-private ubyte[T.sizeof] unRadixify(T)(ref T data) if(isFloatingPoint!(T)) out(res) {
-	import std.stdio;
-	writeln(res);
-} body {
+private T unRadixify(T)(ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
 	uint f = *(cast(uint*) &data);
-	uint mask = (f >> 31) | 0x80000000;
+	uint mask = ((f >> 31) - 1) | 0x80000000;
 	f ^= mask;
 	
-	return *(cast(ubyte[T.sizeof]*) &f);
+	return *(cast(T*) &f);
+}
+
+unittest {
+	foreach(float f; [2.0f, 3.0f, 4.0f, -2.0f, 3.141592f, -7.2563f, -2.1f]) {
+		assert(unRadixify!float(radixify(f)) == f);
+	}
 }
 
 private void computeOffsets(uint S)(uint pass, ref ubyte[S][] source, ref ubyte[S][] destination, ref uint[] counters) in {
@@ -90,8 +90,17 @@ private uint radixMulitPass(T, alias offsetsCalculator = computeOffsets, Radixif
 	while(pass < end) {
 		uint[] counters = histogram[pass * 256 .. (pass + 1) * 256];
 		
+		static if(radixifyMode == RadixifyMode.Radixify || radixifyMode == RadixifyMode.RadixifyAndStore) {
+			// TODO: report dmd bug if the variable is called radix.
+			// TODO: bug repport dmd crash in 1 liner.
+			ubyte[T.sizeof] radox = radixify(*(cast(T*) source.ptr));
+			bool skip = (counters[radox[pass]] == source.length);
+		} else {
+			bool skip = (counters[source[0][pass]] == source.length);
+		}
+		
 		// If all sources has the same value for this radix, skip that iterration.
-		if(counters[source[0][pass]] == source.length) {
+		if(skip) {
 			pass++;
 			continue;
 		}
@@ -102,14 +111,18 @@ private uint radixMulitPass(T, alias offsetsCalculator = computeOffsets, Radixif
 			static if(radixifyMode == RadixifyMode.Radixify) {
 				// TODO: bug repport dmd crash in 1 liner.
 				ubyte[T.sizeof] radix = radixify(*(cast(T*) data.ptr));
+				
 				destination[counters[radix[pass]]++] = data;
+			} else static if(radixifyMode == RadixifyMode.UnRadixify) {
+				// TODO: bug repport dmd crash in 1 liner.
+				T radix = unRadixify!T(data);
+				
+				destination[counters[data[pass]]++] = *(cast(ubyte[T.sizeof]*) &radix);
 			} else {
 				static if(radixifyMode == RadixifyMode.RadixifyAndStore) {
 					data = radixify(*(cast(T*) data.ptr));
-				} else static if(radixifyMode == RadixifyMode.UnRadixify) {
-					data = unRadixify(*(cast(T*) data.ptr));
 				}
-			
+				
 				destination[counters[data[pass]]++] = data;
 			}
 		}
@@ -130,11 +143,7 @@ private uint radixMulitPass(T, alias offsetsCalculator = computeOffsets, Radixif
 
 uint radix(T)(T[] datas) if(isNumeric!(T) && (T.sizeof <= maxTypeSize)) in {
 	assert(datas.length <= uint.max);
-} out{
-	static if(is(T == float)) {
-		import std.stdio;
-		writeln(datas);
-	}
+} out {
 	assert(isSorted(datas));
 } body {
 	uint[] histogram = .histogram[0 .. 256 * T.sizeof];
@@ -192,38 +201,58 @@ uint radix(T)(T[] datas) if(isNumeric!(T) && (T.sizeof <= maxTypeSize)) in {
 	
 	assert(p == pe);
 	
-	uint nbPasses	= 0;
-	uint pass		= 0;
-	
-	static if(isUnsigned!(T)) {
-		uint end = T.sizeof;
-	} else {
-		uint end = T.sizeof - 1;
-	}
-	
+	uint nbPasses		= 0;
+	uint pass			= 0;
 	static if(requireRadixify!(T)) {
+		immutable uint end = T.sizeof - 1;
+		
 		nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.RadixifyAndStore)(source, destination, pass, end);
-	}
-	
-	static if(isUnsigned!(T) || (T.sizeof > 1)) {
-		nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.DoNothing)(source, destination, pass, end);
-	}
-	
-	// If we have a signed value, then we do an extra pass.
-	static if(isSigned!(T)) {
-		static if(requireRadixify!(T)) {
-			if(nbPasses > 0) {
-				nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.UnRadixify)(source, destination, pass, end + 1);
-			} else {
-				nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.Radixify)(source, destination, pass, end + 1);
+		
+		if(pass < end) {
+			nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.DoNothing)(source, destination, pass, end);
+		}
+		
+		if(nbPasses > 0) {
+			// I we have at least one pass, data has to be unradixified.
+			uint unRadixifyPass = radixMulitPass!(T, computeOffsets, RadixifyMode.UnRadixify)(source, destination, pass, end + 1);
+			
+			if(unRadixifyPass == 0) {
+				// The unradixification has not been done !
+				if((nbPasses % 2) == 0) {
+					// Do in place unradixification.
+					destination = source;
+				}
+				
+				foreach(uint i, ubyte[T.sizeof] data; source) {
+					T radix = unRadixify!T(source[i]);
+					destination[i] = *(cast(ubyte[T.sizeof]*) &radix);
+				}
 			}
-		} else {	
+			
+			nbPasses++;
+		} else {
+			// If we have 0 passes, then we have to radixify, but do not store the result as we are in the last pass.
+			nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.Radixify)(source, destination, pass, end + 1);
+		}
+	} else {
+		static if(isSigned!(T)) {
+			immutable uint end = T.sizeof - 1;
+		} else {
+			immutable uint end = T.sizeof;
+		}
+		
+		static if(end > 0) {
+			nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.DoNothing)(source, destination, pass, end);
+		}
+		
+		// If we have a signed value, then we do an extra pass with different offset computation.
+		static if(isSigned!(T)) {
 			nbPasses += radixMulitPass!(T, computeSignedOffsets, RadixifyMode.DoNothing)(source, destination, pass, end + 1);
 		}
 	}
 	
 	// If an odd number of passes have been done, they we need to copy once more to get an in place sort.
-	if((nbPasses % 2) != 0)  {
+	if(((nbPasses % 2) != 0) && (source.ptr != destination.ptr))  {
 		destination[] = source;
 		nbPasses++;
 	}
@@ -264,7 +293,8 @@ unittest {
 		return elapsed;
 	}
 	
-	foreach(S; [128, 256, 512, 8192, 65536/*, 65536 * 32, 65536 * 256*/]) {
+	immutable ptrdiff_t[] SIZES = [128, 256, 512, 8192, 65536, 65536 * 32, 65536 * 256];
+	foreach(S; SIZES) {
 		foreach(T; TypeTuple!(ubyte, byte, ushort, short, uint, int/*, ulong, long*/)) {
 			// Prepare buffer
 			if(buffer.length < S * T.sizeof) {
@@ -339,8 +369,7 @@ unittest {
 		}
 	}
 	
-	float[] f = [1.0f, 2.0f, 3.0f, 0.0f, -1.0f, -2.0f, 13.4f];
+	float[] f = [2.1f, 2.0f, 3.0f, 7.256f, -3.141592f];
 	test(f, "float");
-	writeln(f);
 }
 
