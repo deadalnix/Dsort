@@ -4,67 +4,140 @@ import std.algorithm;
 import std.traits;
 import core.memory;
 
+// By testing this radix isn't interesting if sizeof > 4. I don't really know why.
+private immutable uint maxTypeSize = 4;
 private void[] buffer = void;
-private uint[256] offsets = void;
-private uint[2048] histogramBuffer = void;
+private uint[maxTypeSize * 256] histogram = void;
 
 void clearBuffer() {
 	buffer = null;
 }
 
-private void computeOffsets(uint S)(uint pass, ref ubyte[S][] source, ref ubyte[S][] destination, const ref uint[] counters) in {
+template requireRadixify(T) {
+	enum bool requireRadixify = isFloatingPoint!(T);
+}
+
+enum RadixifyMode {
+	DoNothing,
+	Radixify,
+	RadixifyAndStore,
+	UnRadixify,
+}
+
+private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) out(res) {
+	import std.stdio;
+	writeln(res);
+} body {
+	uint f = *(cast(uint*) &data);
+	uint mask = -(f >> 31) | 0x80000000;
+	f ^= mask;
+	
+	return *(cast(ubyte[T.sizeof]*) &f);
+}
+
+private ubyte[T.sizeof] unRadixify(T)(ref T data) if(isFloatingPoint!(T)) out(res) {
+	import std.stdio;
+	writeln(res);
+} body {
+	uint f = *(cast(uint*) &data);
+	uint mask = (f >> 31) | 0x80000000;
+	f ^= mask;
+	
+	return *(cast(ubyte[T.sizeof]*) &f);
+}
+
+private void computeOffsets(uint S)(uint pass, ref ubyte[S][] source, ref ubyte[S][] destination, ref uint[] counters) in {
 	assert(pass < S);
 } body {
-	offsets[0] = 0;
-	foreach(uint i, ref uint offset; offsets[1 .. $]) {
-		offset = offsets[i] + counters[i];
+	uint prevcount = counters[0];
+	counters[0] = 0;
+	foreach(uint i, ref uint count; counters[1 .. $]) {
+		uint currcount	= count;
+		count			= counters[i] + prevcount;
+		prevcount		= currcount;
 	}
 }
 
-private void computeSignedOffsets(uint S)(uint pass, ref ubyte[S][] source, ref ubyte[S][] destination, const ref uint[] counters) in {
+private void computeSignedOffsets(uint S)(uint pass, ref ubyte[S][] source, ref ubyte[S][] destination, ref uint[] counters) in {
 	assert(pass < S);
 } body {
+	uint prevcount = void, currcount = void;
+	
 	// Negatives values (from 128 to 255) come first.
-	offsets[128] = 0;
+	prevcount = counters[128];
+	counters[128] = 0;
 	for(uint i = 128; i < 255; i++) {
-		offsets[i + 1] = offsets[i] + counters[i];
+		currcount		= counters[i + 1];
+		counters[i + 1] = counters[i] + prevcount;
+		prevcount		= currcount;
 	}
 	
 	// Positives values (from 0 to 127) comes after negatives.
-	offsets[0] = offsets[255] + counters[255];
+	currcount	= counters[0];
+	counters[0]	= prevcount + counters[255];
+	prevcount	= currcount;
 	for(uint i = 0; i < 127; i++) {
-		offsets[i + 1] = offsets[i] + counters[i];
+		currcount		= counters[i + 1];
+		counters[i + 1] = counters[i] + prevcount;
+		prevcount		= currcount;
 	}
 }
 
-private uint radixMulitPass(uint S, uint A, uint B, alias OffsetsCalculator = computeOffsets)(ref ubyte[S][] source, ref ubyte[S][] destination, uint[] histogram) if(A < B && B <= S) {
+private uint radixMulitPass(T, alias offsetsCalculator = computeOffsets, RadixifyMode radixifyMode = RadixifyMode.DoNothing)(ref ubyte[T.sizeof][] source, ref ubyte[T.sizeof][] destination, ref uint pass, uint end) in {
+	assert(pass < end && end <= T.sizeof);
+} body {
 	uint nbPasses = 0;
-	foreach(pass; A .. B) {
+	while(pass < end) {
 		uint[] counters = histogram[pass * 256 .. (pass + 1) * 256];
 		
 		// If all sources has the same value for this radix, skip that iterration.
-		if(counters[source[0][pass]] == source.length) continue;
+		if(counters[source[0][pass]] == source.length) {
+			pass++;
+			continue;
+		}
 		
-		OffsetsCalculator!(S)(pass, source, destination, counters);
+		offsetsCalculator!(T.sizeof)(pass, source, destination, counters);
 		
-		nbPasses++;
-		
-		foreach(ubyte[S] data; source) {
-			destination[offsets[data[pass]]++] = data;
+		foreach(uint i, ubyte[T.sizeof] data; source) {
+			static if(radixifyMode == RadixifyMode.Radixify) {
+				// TODO: bug repport dmd crash in 1 liner.
+				ubyte[T.sizeof] radix = radixify(*(cast(T*) data.ptr));
+				destination[counters[radix[pass]]++] = data;
+			} else {
+				static if(radixifyMode == RadixifyMode.RadixifyAndStore) {
+					data = radixify(*(cast(T*) data.ptr));
+				} else static if(radixifyMode == RadixifyMode.UnRadixify) {
+					data = unRadixify(*(cast(T*) data.ptr));
+				}
+			
+				destination[counters[data[pass]]++] = data;
+			}
 		}
 		
 		swap(source, destination);
+		pass++;
+		
+		static if(radixifyMode == RadixifyMode.DoNothing) {
+			nbPasses++;
+		} else {
+			// We want to run radixify once
+			return 1;
+		}
 	}
 	
 	return nbPasses;
 }
 
-uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
+uint radix(T)(T[] datas) if(isNumeric!(T) && (T.sizeof <= maxTypeSize)) in {
 	assert(datas.length <= uint.max);
 } out{
+	static if(is(T == float)) {
+		import std.stdio;
+		writeln(datas);
+	}
 	assert(isSorted(datas));
 } body {
-	uint[] histogram = histogramBuffer[0 .. 256 * T.sizeof];
+	uint[] histogram = .histogram[0 .. 256 * T.sizeof];
 	
 	// Create required buffer
 	auto dataSize = datas.length * T.sizeof;
@@ -72,24 +145,27 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	
 	// Prepare source and destination slices.
 	ubyte[T.sizeof][] source		= cast(ubyte[T.sizeof][]) datas;
-	ubyte[T.sizeof][] destination	= (cast(ubyte[T.sizeof][]) buffer)[0 .. source.length];
+	ubyte[T.sizeof][] destination	= (cast(ubyte[T.sizeof][]) buffer)[0 .. source.length]; // Buffer can be longer from a previous run of radix, so we slice it.
 	
 	// Build histograms
-	histogram[]			= 0;
-	T prev				= datas[0];
-	ubyte[T.sizeof]* p	= source.ptr;
-	ubyte[T.sizeof]* pe	= p + source.length;
+	histogram[]	= 0;
+	T* prev		= datas.ptr;
+	T* p		= datas.ptr;
+	T* pe		= p + datas.length;
 	while(p < pe) {
-		ubyte[T.sizeof] rawdata = *p;
-		
 		// Check if array is already sorted
-		T current = *(cast(T*) rawdata.ptr);
-		if(current < prev) break;
-		prev = current;
+		if(*p < *prev) break;
+		prev = p;
 		
 		// Fill histogram
-		foreach(uint i, ubyte radix; rawdata) {
-			histogram[radix + i * 256]++;
+		static if(requireRadixify!(T)) {
+			foreach(uint i, ubyte radix; radixify(*p)) {
+				histogram[radix + i * 256]++;
+			}
+		} else {
+			foreach(uint i, ubyte radix; *(cast(ubyte[T.sizeof]*) p)) {
+				histogram[radix + i * 256]++;
+			}
 		}
 		
 		p++;
@@ -100,11 +176,15 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	
 	// Finish filling histogram without checkign if the array is already sorted.
 	while(p < pe) {
-		ubyte[T.sizeof] rawdata = *p;
-		
 		// Fill histogram
-		foreach(uint i, ubyte radix; rawdata) {
-			histogram[radix + i * 256]++;
+		static if(requireRadixify!(T)) {
+			foreach(uint i, ubyte radix; radixify(*p)) {
+				histogram[radix + i * 256]++;
+			}
+		} else {
+			foreach(uint i, ubyte radix; *(cast(ubyte[T.sizeof]*) p)) {
+				histogram[radix + i * 256]++;
+			}
 		}
 		
 		p++;
@@ -112,15 +192,34 @@ uint radix(T)(T[] datas) if(isIntegral!(T) && (T.sizeof <= 8)) in {
 	
 	assert(p == pe);
 	
-	uint nbPasses;
+	uint nbPasses	= 0;
+	uint pass		= 0;
+	
 	static if(isUnsigned!(T)) {
-		nbPasses = radixMulitPass!(T.sizeof, 0, T.sizeof)(source, destination, histogram);
+		uint end = T.sizeof;
 	} else {
-		static if(T.sizeof > 1) {
-			nbPasses = radixMulitPass!(T.sizeof, 0, T.sizeof - 1)(source, destination, histogram);
+		uint end = T.sizeof - 1;
+	}
+	
+	static if(requireRadixify!(T)) {
+		nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.RadixifyAndStore)(source, destination, pass, end);
+	}
+	
+	static if(isUnsigned!(T) || (T.sizeof > 1)) {
+		nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.DoNothing)(source, destination, pass, end);
+	}
+	
+	// If we have a signed value, then we do an extra pass.
+	static if(isSigned!(T)) {
+		static if(requireRadixify!(T)) {
+			if(nbPasses > 0) {
+				nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.UnRadixify)(source, destination, pass, end + 1);
+			} else {
+				nbPasses += radixMulitPass!(T, computeOffsets, RadixifyMode.Radixify)(source, destination, pass, end + 1);
+			}
+		} else {	
+			nbPasses += radixMulitPass!(T, computeSignedOffsets, RadixifyMode.DoNothing)(source, destination, pass, end + 1);
 		}
-		
-		nbPasses += radixMulitPass!(T.sizeof, T.sizeof - 1, T.sizeof, computeSignedOffsets)(source, destination, histogram);
 	}
 	
 	// If an odd number of passes have been done, they we need to copy once more to get an in place sort.
@@ -144,7 +243,7 @@ unittest {
 	ulong test(T)(T[] v, string testname) {
 		sw.reset();
 		uint passes = radix(v);
-		ulong elapsed = sw.peek().nsecs;
+		ulong elapsed = sw.peek().hnsecs;
 		
 		assert(isSorted(v));
 		
@@ -153,8 +252,20 @@ unittest {
 		return elapsed;
 	}
 	
-	foreach(S; [128, 256, 512, 8192, 65536, 65536 * 32]) {
-		foreach(T; TypeTuple!(ubyte, byte, ushort, short, uint, int, ulong, long)) {
+	ulong refdruntime(T)(T[] v, string testname) {
+		sw.reset();
+		v.sort;
+		ulong elapsed = sw.peek().hnsecs;
+		
+		assert(isSorted(v));
+		
+		writeln(T.stringof, "\t: ", elapsed, "\tReference\t", testname);
+		
+		return elapsed;
+	}
+	
+	foreach(S; [128, 256, 512, 8192, 65536/*, 65536 * 32, 65536 * 256*/]) {
+		foreach(T; TypeTuple!(ubyte, byte, ushort, short, uint, int/*, ulong, long*/)) {
 			// Prepare buffer
 			if(buffer.length < S * T.sizeof) {
 				clearBuffer();
@@ -179,7 +290,7 @@ unittest {
 					v[b] = cast(T) b;
 				}
 				
-				test(v, "sorted1");
+				test(v.dup, "sorted1");
 				
 				foreach(b; T.min .. min(T.min + S, T.max)) {
 					v[b - T.min] = cast(T) b;
@@ -221,9 +332,15 @@ unittest {
 					}
 				}
 				
-				test(v, "random");
+				test(v.dup, "random");
+				
+				refdruntime(v, "random");
 			}
 		}
 	}
+	
+	float[] f = [1.0f, 2.0f, 3.0f, 0.0f, -1.0f, -2.0f, 13.4f];
+	test(f, "float");
+	writeln(f);
 }
 
