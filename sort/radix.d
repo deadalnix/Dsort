@@ -213,7 +213,7 @@ uint radix(T)(T[] datas) if(isNumeric!(T) && (T.sizeof <= maxTypeSize)) in {
 		}
 		
 		if(nbPasses > 0) {
-			// I we have at least one pass, data has to be unradixified.
+			// If we have at least one pass, data has to be unradixified.
 			uint unRadixifyPass = radixMulitPass!(T, computeOffsets, RadixifyMode.UnRadixify)(source, destination, pass, end + 1);
 			
 			if(unRadixifyPass == 0) {
