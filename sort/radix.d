@@ -32,8 +32,8 @@ private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) {
 	return *(cast(ubyte[T.sizeof]*) &f);
 }
 
-private T unRadixify(T)(ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
-	uint f = *(cast(uint*) &data);
+private T unRadixify(T)(ref ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
+	uint f = *(cast(uint*) data.ptr);
 	uint mask = ((f >> 31) - 1) | 0x80000000;
 	f ^= mask;
 	
