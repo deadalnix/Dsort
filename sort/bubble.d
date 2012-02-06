@@ -1,12 +1,22 @@
 module sort.bubble;
 
 import std.algorithm;
-import std.functional;
 
-void bubble(alias less = "a < b", T)(T[] datas) {
+void bubble(alias less = "a < b", T)(T datas) if(isForwardRange!T) {
+	import std.functional;
 	alias binaryFun!(less) lessFun;
 	
-	size_t last = datas.length - 1;
+	T first = T.save;
+	
+	T current = T.save;
+	auto ref a = current.front;
+	current.popFront();
+	foreach(b; current) {
+		if(lessFun(datas[i + 1], current)) {
+			swap(b, a);
+			lastSwap = i;
+		}
+	}
 	
 	while(last > 0) {
 		size_t lastSwap = 0;

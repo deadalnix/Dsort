@@ -1,4 +1,4 @@
-module radix;
+module sort.radix;
 
 import std.algorithm;
 import std.traits;
@@ -24,7 +24,7 @@ private enum RadixifyMode {
 	UnRadixify,
 }
 
-private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) {
+private ubyte[T.sizeof] radixify(T)(ref const T data) if(isFloatingPoint!(T)) {
 	uint f = *(cast(uint*) &data);
 	uint mask = -(f >> 31) | 0x80000000;
 	f ^= mask;
@@ -32,7 +32,7 @@ private ubyte[T.sizeof] radixify(T)(ref T data) if(isFloatingPoint!(T)) {
 	return *(cast(ubyte[T.sizeof]*) &f);
 }
 
-private T unRadixify(T)(ref ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
+private T unRadixify(T)(ref const ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
 	uint f = *(cast(uint*) data.ptr);
 	uint mask = ((f >> 31) - 1) | 0x80000000;
 	f ^= mask;
@@ -42,7 +42,8 @@ private T unRadixify(T)(ref ubyte[T.sizeof] data) if(isFloatingPoint!(T)) {
 
 unittest {
 	foreach(float f; [2.0f, 3.0f, 4.0f, -2.0f, 3.141592f, -7.2563f, -2.1f]) {
-		assert(unRadixify!float(radixify(f)) == f);
+		auto test = radixify(f);
+		assert(unRadixify!float(test) == f);
 	}
 }
 
@@ -293,7 +294,7 @@ unittest {
 		return elapsed;
 	}
 	
-	immutable ptrdiff_t[] SIZES = [128, 256, 512, 8192, 65536, 65536 * 32, 65536 * 256];
+	immutable ptrdiff_t[] SIZES = [128, 256, 512, 8192, 65536, 65536 * 32/*, 65536 * 256*/];
 	foreach(S; SIZES) {
 		foreach(T; TypeTuple!(ubyte, byte, ushort, short, uint, int/*, ulong, long*/)) {
 			// Prepare buffer
@@ -385,7 +386,7 @@ unittest {
 			test(v.dup, "random");
 			
 			// TODO: phobos crash on that one, do bug repport.
-			// refdruntime(v, "random");
+			refdruntime(v, "random");
 		}
 	}
 }
