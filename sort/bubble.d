@@ -4,19 +4,19 @@ import std.algorithm;
 import std.array;
 import std.range;
 
-SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
+SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range r) if(isInputRange!Range) {
 	import std.functional;
 	alias binaryFun!(less) lessFun;
 	
 	size_t lastSwap	= -1;
 	while(lastSwap > 0) {
-		auto current = datas.save;
+		auto current = r.save;
 		current.popFront();
 		if(current.empty) break;
 		
 		size_t i		= 0;
 		size_t swapPos	= 0;
-		foreach(ref a, ref b; lockstep(current, datas)) {
+		foreach(ref a, ref b; lockstep(current, r.save)) {
 			if(i > lastSwap) break;
 			
 			i++;
@@ -30,9 +30,9 @@ SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 		lastSwap = swapPos;
 	}
 	
-	assert(isSorted!less(datas));
+	assert(isSorted!less(r));
 	
-	return assumeSorted!less(datas);
+	return assumeSorted!less(r);
 }
 
 unittest {
