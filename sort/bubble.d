@@ -1,42 +1,46 @@
 module sort.bubble;
 
-import std.algorithm;
+import std.array;
 
-void bubble(alias less = "a < b", T)(T datas) if(isForwardRange!T) {
+SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 	import std.functional;
 	alias binaryFun!(less) lessFun;
 	
-	T first = T.save;
-	
-	T current = T.save;
-	auto ref a = current.front;
-	current.popFront();
-	foreach(b; current) {
-		if(lessFun(datas[i + 1], current)) {
-			swap(b, a);
-			lastSwap = i;
-		}
-	}
-	
-	while(last > 0) {
-		size_t lastSwap = 0;
+	size_t lastSwap	= -1;
+	while(lastSwap > 0) {
+		import std.range;
 		
-		foreach(size_t i, ref T current; datas[0 .. last]) {
-			if(lessFun(datas[i + 1], current)) {
-				swap(current, datas[i + 1]);
-				lastSwap = i;
+		auto current = datas.save;
+		current.popFront();
+		if(current.empty) break;
+		
+		size_t i		= 0;
+		size_t swapPos	= 0;
+		foreach(ref a, ref b; lockstep(current, datas)) {
+			if(i > lastSwap) break;
+			
+			i++;
+			if(lessFun(a, b)) {
+				import std.algorithm;
+				swap(a, b);
+				
+				swapPos = i;
 			}
 		}
 		
-		last = lastSwap;
+		lastSwap = swapPos;
 	}
+	
+	return assumeSorted!less(datas);
 }
 
 unittest {
+	import std.algorithm;
 	import std.conv;
 	import std.datetime;
 	import std.stdio;
 	import std.typetuple;
+	import std.array;
 	
 	StopWatch sw = StopWatch(AutoStart.yes);
 	
