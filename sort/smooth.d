@@ -2,6 +2,7 @@ module sort.smooth;
 
 import std.algorithm;
 import std.range;
+import std.array;
 
 // A list of all the Leonardo numbers below 2^32, or 2^64 depending on system
 static if(size_t.sizeof == 4) {
@@ -67,31 +68,31 @@ debug {
 		string sizeLine = "";
 		size_t level	= 0;
 		size_t maxSize	= 1;
-	
+		
 		scope(exit) {
 			foreach(_; datas) {
 				write("********");
 			}
-		
+			
 			writeln();
-		
+			
 			foreach(line; retro(lines)) {
 				writeln(line);
 			}
-		
+			
 			// writeln(debugLine);
 			// writeln(sizeLine);
 		}
-	
+		
 		foreach(size_t processed, data; datas) {
 			forest.add();
-		
+			
 			debugLine ~= to!string(level);
-		
+			
 			if(forest.size < 2) {
 				lines[level] ~= to!string(data);
 			} else {
-			
+				
 				if(forest.size == 2) {
 					level++;
 					debugLine ~= "+";
@@ -99,22 +100,22 @@ debug {
 					level--;
 					debugLine ~= "-";
 				}
-			
+				
 				size_t noLine = level + forest.size - 2;
-			
+				
 				if(lines.length <= noLine) {
 					lines.length = noLine + 1;
-				
+					
 					for(size_t i = 0; i < processed; i++) {
 						lines[noLine] ~= "\t";
 					}
 				}
-			
+				
 				lines[noLine] ~= to!string(data);
 			}
-		
+			
 			size_t remainingItems = datas.length - processed - 1;
-		
+			
 			bool isLast = false;
 			switch(forest.size) {
 				case 1:
@@ -129,16 +130,16 @@ debug {
 					// If both tree are ltn and ltn-1 and one item will be added, this isn't the last tree.
 					isLast = !((remainingItems > leonardoNumbers[forest.size - 1]) || ((remainingItems > 0) && ((forest.forest & 0x03) == 0x03)));
 			}
-	
+			
 			if(isLast) {
 				// New tree !
 				level = 0;
 			}
-		
+			
 			foreach(ref line; lines) {
 				line ~= "\t";
 			}
-		
+			
 			debugLine ~= "\t";
 			sizeLine ~= to!string(forest.size) ~ "\t";
 		}
@@ -270,6 +271,8 @@ SortedRange!(Range, less) smooth(alias less = "a < b", Range)(Range datas) {
 	for(size_t i = datas.length; i > 2; i--) {
 		remove!lessFun(datas[0 .. i], forest);
 	}
+	
+	assert(isSorted!less(datas));
 	
 	return assumeSorted!less(datas);
 }

@@ -1,6 +1,8 @@
 module sort.bubble;
 
+import std.algorithm;
 import std.array;
+import std.range;
 
 SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 	import std.functional;
@@ -8,8 +10,6 @@ SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 	
 	size_t lastSwap	= -1;
 	while(lastSwap > 0) {
-		import std.range;
-		
 		auto current = datas.save;
 		current.popFront();
 		if(current.empty) break;
@@ -21,7 +21,6 @@ SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 			
 			i++;
 			if(lessFun(a, b)) {
-				import std.algorithm;
 				swap(a, b);
 				
 				swapPos = i;
@@ -31,11 +30,12 @@ SortedRange!(Range, less) bubble(alias less = "a < b", Range)(Range datas) {
 		lastSwap = swapPos;
 	}
 	
+	assert(isSorted!less(datas));
+	
 	return assumeSorted!less(datas);
 }
 
 unittest {
-	import std.algorithm;
 	import std.conv;
 	import std.datetime;
 	import std.stdio;
